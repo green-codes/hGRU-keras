@@ -8,7 +8,7 @@ import numpy as np
 import imageio
 from PIL import Image, ImageOps
 
-import tensorflow as tf
+import tensorflow.keras as keras
 
 def get_filenames(path, extension):
     return [x for x in os.listdir(path) if x.endswith(extension)]
@@ -47,7 +47,7 @@ def data_generator_BSDS(x_path, y_path):
         yield(np.array(x_arr), np.array(y_arr))
 
 
-class DataGenerator_Pathfinder(tf.keras.utils.Sequence):
+class DataGenerator_Pathfinder(keras.utils.Sequence):
 
     def __init__(self, data_root, batch_size=8):
         """
