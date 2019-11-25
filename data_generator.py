@@ -47,19 +47,20 @@ def data_generator_BSDS(x_path, y_path):
 def data_generator_pathfinder(data_root):
     """
     data generator for the BSDS dataset
+    - Note: y-encoding is [P(negative), P(positive)]
     """
     
-    data_path += '/' if not data_path.endswith('/') else ''
+    data_root += '/' if not data_root.endswith('/') else ''
     
     # positive samples
-    x_path = data_path + "curv_baseline/imgs/"
+    x_path = data_root + "curv_baseline/imgs/"
     for d in os.listdir(x_path):
         for f in get_filenames(d, '.png'):
-            yield (imageio.imread(x_path+f), np.array([1,0]))
-        
-    # posinegativetive samples
-    x_path = data_path + "curv_baseline_neg/imgs/"
+            yield (imageio.imread(x_path + f), np.array([0,1]))
+
+    # negative samples
+    x_path = data_root + "curv_baseline_neg/imgs/"
     for d in os.listdir(x_path):
         for f in get_filenames(d, '.png'):
-            yield (imageio.imread(x_path+f), np.array([1,0]))
+            yield (imageio.imread(x_path + f), np.array([1,0]))
     
