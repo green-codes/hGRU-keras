@@ -61,7 +61,7 @@ class hGRUCell(keras.layers.Layer):
                                   shape=(1,1,input_shape[-1]),
                                   initializer=keras.initializers.Zeros(),
                                   trainable=True)
-        self.b2 = self.add_weight(name='b1', 
+        self.b2 = self.add_weight(name='b2', 
                                   shape=(1,1,input_shape[-1]),
                                   initializer=keras.initializers.Zeros(),
                                   trainable=True)
@@ -258,7 +258,7 @@ class hGRUConv_segment(keras.Model):
         del(vgg16)
 
         # hGRU layer
-        self.hgru = hGRUCell(spatial_extent=5, timesteps=8, batchnorm=False)
+        self.hgru = hGRUCell(spatial_extent=7, timesteps=8, batchnorm=True)
 
         # two blocks of upsampling and conv, mirroring the input blocks
         self.block3_upsample = keras.layers.UpSampling2D(size=(2,2))

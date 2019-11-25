@@ -44,23 +44,38 @@ def data_generator_BSDS(x_path, y_path):
 
         yield(np.array(x_arr), np.array(y_arr))
         
-def data_generator_pathfinder(data_root):
+def data_generator_pathfinder(data_root, batch_size=8):
     """
     data generator for the BSDS dataset
     - Note: y-encoding is [P(negative), P(positive)]
     """
     
     data_root += '/' if not data_root.endswith('/') else ''
+
+    x_files = []
+    y_arr_all = []
     
     # positive samples
     x_path = data_root + "curv_baseline/imgs/"
-    for d in os.listdir(x_path):
-        for f in get_filenames(d, '.png'):
-            yield (imageio.imread(x_path + f), np.array([0,1]))
+    dirs = [d for d in os.listdir(x_path) if os.path.isdir(os.path.join(x_path,d))]
+    for d in dirs:
+        for f in get_filenames(x_path+d, '.png'):
+            x_files += ["{}{}/{}".format(x_path,d,f)]
+            y_arr_all += [[0,1]]
 
     # negative samples
     x_path = data_root + "curv_baseline_neg/imgs/"
-    for d in os.listdir(x_path):
-        for f in get_filenames(d, '.png'):
-            yield (imageio.imread(x_path + f), np.array([1,0]))
-    
+    dirs = [d for d in os.listdir(x_path) if os.path.isdir(os.path.join(x_path,d))]
+    for d in dirs:
+        for f in get_filenames(x_path+d, '.png'):
+            x_files += ["{}{}/{}".format(x_path,d,f)]
+            y_arr_all += [[1,0]]
+
+    for i in range(len(x_files) // batch_size):
+        # TODO: not handling the last batch
+        x_arr = np.empty((0,300,300,1))
+        y_arr = np.empty((0,2))
+        for j in range(batch_size):
+            x_arr = np.vstack((x_arr, imageio.imread(x_files[i*batch_size+j]).reshape(1,300,300,1)))
+            y_arr = np.vstack((y_arr, np.array(y_arr_all[i*batch_size+j])))
+        yield (x_arr, y_arr)
