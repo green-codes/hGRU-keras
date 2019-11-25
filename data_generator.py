@@ -8,6 +8,8 @@ import numpy as np
 import imageio
 from PIL import Image, ImageOps
 
+import tensorflow as tf
+
 def get_filenames(path, extension):
     return [x for x in os.listdir(path) if x.endswith(extension)]
 
@@ -45,7 +47,7 @@ def data_generator_BSDS(x_path, y_path):
         yield(np.array(x_arr), np.array(y_arr))
 
 
-class DataGenerator_Pathfinder:
+class DataGenerator_Pathfinder(tf.keras.util.Sequence):
 
     def __init__(self, data_root, batch_size=8):
         """
@@ -106,14 +108,16 @@ class DataGenerator_Pathfinder:
             y = np.array(self._y_arr_all[index*self._batch_size+j])
             x_arr = np.vstack((x_arr, x))
             y_arr = np.vstack((y_arr, y))
-        return (x_arr, y_arr)
+        return x_arr, y_arr
+
+
+    def on_epoch_end(self):
+        self._iter_idx = 0
+        self._shuffle()
 
 
     def _shuffle(self):
         rand_idx = np.random.permutation(len(self._x_files))
         self._x_files = self._x_files[rand_idx]
         self._y_arr_all = self._y_arr_all[rand_idx]
-
-
-    def get_generator_func(self):
-        return self.__iter__
+        
