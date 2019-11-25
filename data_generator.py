@@ -45,7 +45,7 @@ def data_generator_BSDS(x_path, y_path):
         yield(np.array(x_arr), np.array(y_arr))
 
 
-class data_generator_pathfinder:
+class DataGenerator_Pathfinder:
 
     def __init__(self, data_root, batch_size=8):
         """
@@ -86,6 +86,15 @@ class data_generator_pathfinder:
     def __len__(self):
         return self._nsamples // self._batch_size
 
+    
+    def __iter__(self):
+        while True:
+            if self._iter_idx >= self.__len__():
+                self._iter_idx = 0
+            res = self.__getitem__(self._iter_idx)
+            self._iter_idx += 1
+            yield res
+
 
     def __getitem__(self, index):
         if index >= self.__len__():
@@ -98,14 +107,6 @@ class data_generator_pathfinder:
             x_arr = np.vstack((x_arr, x))
             y_arr = np.vstack((y_arr, y))
         return (x_arr, y_arr)
-
-
-    def __next__(self):
-        if self._iter_idx >= self.__len__():
-            self._iter_idx = 0
-        res = self.__getitem__(self._iter_idx)
-        self._iter_idx += 1
-        return res
 
 
     def _shuffle(self):
