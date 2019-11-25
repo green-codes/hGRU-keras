@@ -43,39 +43,72 @@ def data_generator_BSDS(x_path, y_path):
             y_arr += [y.astype(float)]
 
         yield(np.array(x_arr), np.array(y_arr))
+
+
+class data_generator_pathfinder:
+
+    def __init__(self, data_root, batch_size=8):
+        """
+        data generator for the BSDS dataset
+        - Note: y-encoding is [P(negative), P(positive)]
+        """
         
-def data_generator_pathfinder(data_root, batch_size=8):
-    """
-    data generator for the BSDS dataset
-    - Note: y-encoding is [P(negative), P(positive)]
-    """
-    
-    data_root += '/' if not data_root.endswith('/') else ''
+        data_root += '/' if not data_root.endswith('/') else ''
+        self._batch_size = batch_size
 
-    x_files = []
-    y_arr_all = []
-    
-    # positive samples
-    x_path = data_root + "curv_baseline/imgs/"
-    dirs = [d for d in os.listdir(x_path) if os.path.isdir(os.path.join(x_path,d))]
-    for d in dirs:
-        for f in get_filenames(x_path+d, '.png'):
-            x_files += ["{}{}/{}".format(x_path,d,f)]
-            y_arr_all += [[0,1]]
+        self._x_files = []
+        self._y_arr_all = []
+        
+        # positive samples
+        x_path = data_root + "curv_baseline/imgs/"
+        dirs = [d for d in os.listdir(x_path) if os.path.isdir(os.path.join(x_path,d))]
+        for d in dirs:
+            for f in get_filenames(x_path+d, '.png'):
+                self._x_files += ["{}{}/{}".format(x_path,d,f)]
+                self._y_arr_all += [[0,1]]
 
-    # negative samples
-    x_path = data_root + "curv_baseline_neg/imgs/"
-    dirs = [d for d in os.listdir(x_path) if os.path.isdir(os.path.join(x_path,d))]
-    for d in dirs:
-        for f in get_filenames(x_path+d, '.png'):
-            x_files += ["{}{}/{}".format(x_path,d,f)]
-            y_arr_all += [[1,0]]
+        # negative samples
+        x_path = data_root + "curv_baseline_neg/imgs/"
+        dirs = [d for d in os.listdir(x_path) if os.path.isdir(os.path.join(x_path,d))]
+        for d in dirs:
+            for f in get_filenames(x_path+d, '.png'):
+                self._x_files += ["{}{}/{}".format(x_path,d,f)]
+                self._y_arr_all += [[1,0]]
 
-    for i in range(len(x_files) // batch_size):
-        # TODO: not handling the last batch
+        self._x_files = np.array(self._x_files)
+        self._y_arr_all = np.array(self._y_arr_all)
+        self._nsamples = len(self._x_files)
+        self._iter_idx = 0
+
+        self._shuffle()
+
+
+    def __len__(self):
+        return self._nsamples // self._batch_size
+
+
+    def __getitem__(self, index):
+        if index >= self.__len__():
+            raise IndexError
         x_arr = np.empty((0,300,300,1))
         y_arr = np.empty((0,2))
-        for j in range(batch_size):
-            x_arr = np.vstack((x_arr, imageio.imread(x_files[i*batch_size+j]).reshape(1,300,300,1)))
-            y_arr = np.vstack((y_arr, np.array(y_arr_all[i*batch_size+j])))
-        yield (x_arr, y_arr)
+        for j in range(self._batch_size):
+            x = imageio.imread(self._x_files[index*self._batch_size+j]).reshape(1,300,300,1)
+            y = np.array(self._y_arr_all[index*self._batch_size+j])
+            x_arr = np.vstack((x_arr, x))
+            y_arr = np.vstack((y_arr, y))
+        return (x_arr, y_arr)
+
+
+    def __next__(self):
+        if self._iter_idx >= self.__len__():
+            self._iter_idx = 0
+        res = self.__getitem__(self._iter_idx)
+        self._iter_idx += 1
+        return res
+
+
+    def _shuffle(self):
+        rand_idx = np.random.permutation(len(self._x_files))
+        self._x_files = self._x_files[rand_idx]
+        self._y_arr_all = self._y_arr_all[rand_idx]
