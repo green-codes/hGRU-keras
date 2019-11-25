@@ -113,3 +113,7 @@ class DataGenerator_Pathfinder:
         rand_idx = np.random.permutation(len(self._x_files))
         self._x_files = self._x_files[rand_idx]
         self._y_arr_all = self._y_arr_all[rand_idx]
+
+
+    def get_generator_func(self):
+        return self.__iter__
