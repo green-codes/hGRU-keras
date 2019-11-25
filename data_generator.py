@@ -5,6 +5,7 @@ Data generators and related stuff
 import os
 import scipy.io
 import numpy as np
+import imageio
 from PIL import Image, ImageOps
 
 def get_filenames(path, extension):
@@ -42,3 +43,23 @@ def data_generator_BSDS(x_path, y_path):
             y_arr += [y.astype(float)]
 
         yield(np.array(x_arr), np.array(y_arr))
+        
+def data_generator_pathfinder(data_root):
+    """
+    data generator for the BSDS dataset
+    """
+    
+    data_path += '/' if not data_path.endswith('/') else ''
+    
+    # positive samples
+    x_path = data_path + "curv_baseline/imgs/"
+    for d in os.listdir(x_path):
+        for f in get_filenames(d, '.png'):
+            yield (imageio.imread(x_path+f), np.array([1,0]))
+        
+    # posinegativetive samples
+    x_path = data_path + "curv_baseline_neg/imgs/"
+    for d in os.listdir(x_path):
+        for f in get_filenames(d, '.png'):
+            yield (imageio.imread(x_path+f), np.array([1,0]))
+    
