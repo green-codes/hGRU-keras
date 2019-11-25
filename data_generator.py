@@ -47,7 +47,7 @@ def data_generator_BSDS(x_path, y_path):
         yield(np.array(x_arr), np.array(y_arr))
 
 
-class DataGenerator_Pathfinder(tf.keras.util.Sequence):
+class DataGenerator_Pathfinder(tf.keras.utils.Sequence):
 
     def __init__(self, data_root, batch_size=8):
         """
@@ -120,4 +120,3 @@ class DataGenerator_Pathfinder(tf.keras.util.Sequence):
         rand_idx = np.random.permutation(len(self._x_files))
         self._x_files = self._x_files[rand_idx]
         self._y_arr_all = self._y_arr_all[rand_idx]
-        
