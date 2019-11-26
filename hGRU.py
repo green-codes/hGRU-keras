@@ -269,7 +269,7 @@ class hGRUConv_segment(keras.Model):
         self.block4_conv2 = keras.layers.Conv2D(filters=64, kernel_size=(3,3), padding='same')
 
         # readout layer
-        self.readout = keras.layers.Conv2D(filters=1, kernel_size=(1,1), padding='same')
+        self.readout = keras.layers.Conv2D(filters=2, kernel_size=(1,1), padding='same')
 
         super(hGRUConv_segment, self).build(input_shape) 
 
