@@ -122,17 +122,17 @@ class hGRUCell(keras.layers.Layer):
             self.h2 = K.random_normal(K.shape(x))
 
         # channel symmetry constraint for w; averaging weights
-        # NOTE: w shape is [height, width, in_channel, out_channel]
-        w_sym = (self.w + K.permute_dimensions(self.w, (0,1,3,2))) * 0.5
+        # TODO: NOT implemented
+        # w_sym = (self.w + K.permute_dimensions(self.w, (0,1,3,2))) * 0.5
 
         # calculate gain G(1)[t]
         # horizontal inhibition C(1)[t]
         if self.batchnorm:
             g1 = K.sigmoid(self.bn[timestep*4](K.conv2d(self.h2, self.u1, padding='same') + self.b1))
-            c1 = self.bn[timestep*4+1](K.conv2d((g1 * self.h2), w_sym, padding='same'))
+            c1 = self.bn[timestep*4+1](K.conv2d((g1 * self.h2), self.w , padding='same'))
         else:
             g1 = K.sigmoid(K.conv2d(self.h2, self.u1) + self.b1)
-            c1 = K.conv2d((g1 * self.h2), w_sym, padding='same')
+            c1 = K.conv2d((g1 * self.h2), self.w , padding='same')
 
         # gain gate / inhibition to get H(1)[t]
         h1 = K.tanh(x - c1 * (self.alpha * self.h2 + self.mu))
@@ -142,9 +142,9 @@ class hGRUCell(keras.layers.Layer):
 
         # horizontal excitation C(2)[t]
         if self.batchnorm:
-            c2 = self.bn[timestep*4+3](K.conv2d(h1, w_sym, padding='same'))
+            c2 = self.bn[timestep*4+3](K.conv2d(h1, self.w , padding='same'))
         else:
-            c2 = K.conv2d(h1, w_sym, padding='same')
+            c2 = K.conv2d(h1, self.w , padding='same')
 
         # output candidate tilda(H(2)[t])
         h2_tilda = K.tanh(self.kappa * h1 + c2 * (self.omega * h1 + self.beta))
@@ -185,7 +185,7 @@ class hGRUConv_binary(keras.Model):
             K.set_value(self.conv1.weights[0], self.conv1_init)
 
         # hGRU layer
-        self.hgru = hGRUCell(spatial_extent=5, timesteps=8, batchnorm=False)
+        self.hgru = hGRUCell(spatial_extent=15, timesteps=8, batchnorm=False)
 
         # conv filter from 25 to 2 channels
         self.conv2 = keras.layers.Conv2D(2, kernel_size=1, padding='same')
@@ -258,7 +258,7 @@ class hGRUConv_segment(keras.Model):
         del(vgg16)
 
         # hGRU layer
-        self.hgru = hGRUCell(spatial_extent=7, timesteps=8, batchnorm=True)
+        self.hgru = hGRUCell(spatial_extent=15, timesteps=8, batchnorm=True)
 
         # two blocks of upsampling and conv, mirroring the input blocks
         self.block3_upsample = keras.layers.UpSampling2D(size=(2,2))
