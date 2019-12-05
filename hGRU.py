@@ -123,16 +123,16 @@ class hGRUCell(keras.layers.Layer):
 
         # channel symmetry constraint for w; averaging weights
         # TODO: NOT implemented
-        # w_sym = (self.w + K.permute_dimensions(self.w, (0,1,3,2))) * 0.5
+        w_sym = (self.w + K.permute_dimensions(self.w, (0,1,3,2))) * 0.5
 
         # calculate gain G(1)[t]
         # horizontal inhibition C(1)[t]
         if self.batchnorm:
             g1 = K.sigmoid(self.bn[timestep*4](K.conv2d(self.h2, self.u1, padding='same') + self.b1))
-            c1 = self.bn[timestep*4+1](K.conv2d((g1 * self.h2), self.w , padding='same'))
+            c1 = self.bn[timestep*4+1](K.conv2d((g1 * self.h2), w_sym, padding='same'))
         else:
             g1 = K.sigmoid(K.conv2d(self.h2, self.u1) + self.b1)
-            c1 = K.conv2d((g1 * self.h2), self.w , padding='same')
+            c1 = K.conv2d((g1 * self.h2), w_sym , padding='same')
 
         # gain gate / inhibition to get H(1)[t]
         h1 = K.tanh(x - c1 * (self.alpha * self.h2 + self.mu))
@@ -142,9 +142,9 @@ class hGRUCell(keras.layers.Layer):
 
         # horizontal excitation C(2)[t]
         if self.batchnorm:
-            c2 = self.bn[timestep*4+3](K.conv2d(h1, self.w , padding='same'))
+            c2 = self.bn[timestep*4+3](K.conv2d(h1, w_sym , padding='same'))
         else:
-            c2 = K.conv2d(h1, self.w , padding='same')
+            c2 = K.conv2d(h1, w_sym, padding='same')
 
         # output candidate tilda(H(2)[t])
         h2_tilda = K.tanh(self.kappa * h1 + c2 * (self.omega * h1 + self.beta))
