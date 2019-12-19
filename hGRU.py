@@ -220,15 +220,16 @@ class hGRUConv_binary(keras.Model):
 
         # hGRU layer
         self.hgru = hGRUCell(spatial_extent=self.spatial_extent, timesteps=self.timesteps, batchnorm=True)
+        self.bn = keras.layers.BatchNormalization(epsilon=1e-3)
 
         # conv filter from 25 to 2 channels
-        self.conv2 = keras.layers.Conv2D(2, kernel_size=1, padding='same')
+        self.conv2 = keras.layers.Conv2D(2, kernel_size=1, padding='same', activation='relu')
         self.bn2 = keras.layers.BatchNormalization()
         # global max pool w/batchnorm; output should be (1,1,2)
         self.maxpool = keras.layers.MaxPool2D((input_shape[1], input_shape[2]), strides=(1,1))
-        self.bn_max = keras.layers.BatchNormalization()
+        self.bn_max = keras.layers.BatchNormalization(epsilon=1e-3)
         # linear output layer
-        self.fc = keras.layers.Dense(units=2, activation='softmax')
+        self.fc = keras.layers.Dense(units=2, activation='linear')
 
         super(hGRUConv_binary, self).build(input_shape) 
 
@@ -242,6 +243,7 @@ class hGRUConv_binary(keras.Model):
         h2 = None
         for i in range(self.timesteps):
             h2 = self.hgru(x, h2, i)
+        h2 = self.bn(h2)
 
         # readout stage
         x = self.conv2(h2)
