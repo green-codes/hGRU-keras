@@ -213,7 +213,7 @@ class hGRUConv_binary(keras.Model):
     def build(self, input_shape):
 
         # conv1 layer initialization weights; good idea to load gabor filters
-        self.conv1 = keras.layers.Conv2D(filters=25, kernel_size=7, padding='same', input_shape=input_shape)
+        self.conv1 = keras.layers.Conv2D(filters=25, kernel_size=7, padding='same')
         if self.conv1_init is not None:
             self.conv1.build(input_shape)
             K.set_value(self.conv1.weights[0], self.conv1_init)
