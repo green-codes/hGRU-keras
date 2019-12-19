@@ -41,8 +41,8 @@ def grad_channel_sym(w): # forward is identity, backward performs channel-sym
 
 class hGRUCell(keras.layers.Layer):
 
-    def __init__(self, spatial_extent=5, timesteps=8, batchnorm=False, relu=True, 
-                 rand_seed=None, channel_sym=True, return_all_steps=False, **kwargs):
+    def __init__(self, spatial_extent=5, timesteps=8, batchnorm=False, channel_sym=True, 
+                 relu=True, rand_seed=None, return_all_steps=False, **kwargs):
         
         self.spatial_extent = spatial_extent
         self.timesteps = timesteps
@@ -224,9 +224,11 @@ class hGRUConv_binary(keras.Model):
 
         # conv filter from 25 to 2 channels
         self.conv2 = keras.layers.Conv2D(2, kernel_size=1, padding='same', activation='relu')
+
         # global max pool w/batchnorm; output should be (1,1,2)
         self.maxpool = keras.layers.MaxPool2D((input_shape[1], input_shape[2]), strides=(1,1))
         self.bn_max = keras.layers.BatchNormalization(epsilon=1e-3)
+        
         # linear output layer
         self.fc = keras.layers.Dense(units=2, activation='linear')
 
