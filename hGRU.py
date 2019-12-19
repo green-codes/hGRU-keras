@@ -224,7 +224,6 @@ class hGRUConv_binary(keras.Model):
 
         # conv filter from 25 to 2 channels
         self.conv2 = keras.layers.Conv2D(2, kernel_size=1, padding='same', activation='relu')
-        self.bn2 = keras.layers.BatchNormalization()
         # global max pool w/batchnorm; output should be (1,1,2)
         self.maxpool = keras.layers.MaxPool2D((input_shape[1], input_shape[2]), strides=(1,1))
         self.bn_max = keras.layers.BatchNormalization(epsilon=1e-3)
@@ -247,7 +246,6 @@ class hGRUConv_binary(keras.Model):
 
         # readout stage
         x = self.conv2(h2)
-        x = self.bn2(x)
         x = self.maxpool(x)
         x = self.bn_max(x)
         x = K.reshape(x, (-1, 2))
