@@ -26,18 +26,29 @@ if use_plaidml:
     import keras
     import keras.backend as K
 else:  # explicitly import tensorflow.keras to fix compatibility issues
+    import tensorflow as tf
     import tensorflow.keras as keras
     import tensorflow.keras.backend as K
+    tf.compat.v1.disable_eager_execution() # needed for between-channel symmetry
 print("hGRU using Keras backend:", keras.backend.__name__)
+
+@tf.custom_gradient
+def grad_channel_sym(w): # forward is identity, backward performs channel-sym
+    # NOTE: currently needs to disable eager execution, bug in TF2.0?
+    def grad(dw):
+        return (dw + tf.transpose(dw, perm=[0,1,3,2])) * 0.5
+    return tf.identity(w), grad
 
 class hGRUCell(keras.layers.Layer):
 
-    def __init__(self, spatial_extent=5, timesteps=8, batchnorm=False, 
-                 rand_seed=None, return_all_steps=False, **kwargs):
+    def __init__(self, spatial_extent=5, timesteps=8, batchnorm=False, relu=True, 
+                 rand_seed=None, channel_sym=True, return_all_steps=False, **kwargs):
         
         self.spatial_extent = spatial_extent
         self.timesteps = timesteps
         self.batchnorm = batchnorm
+        self.channel_sym = channel_sym
+        self.relu = relu
         self.rand_seed = rand_seed if rand_seed else np.uintc(hash(random.random()))
         
         super(hGRUCell, self).__init__(**kwargs)
@@ -48,23 +59,23 @@ class hGRUCell(keras.layers.Layer):
         # NOTE: make sure that all initializer seeds are different! 
         
         # U(1) and U(2): 1x1xKxK kernels; b(1) and b(2): 1x1xK channel-wise gate biases
-        # TODO: use chronos initialization for biases
+        # NOTE: use chronos initialization for biases
         self.u1 = self.add_weight(name='u1', 
                                   shape=(1,1,input_shape[-1], input_shape[-1]),
-                                  initializer=keras.initializers.glorot_normal(seed=self.rand_seed),
+                                  initializer=keras.initializers.Orthogonal(seed=self.rand_seed),
                                   trainable=True)
         self.u2 = self.add_weight(name='u2', 
                                   shape=(1,1,input_shape[-1], input_shape[-1]),
-                                  initializer=keras.initializers.glorot_normal(seed=self.rand_seed+1),
+                                  initializer=keras.initializers.Orthogonal(seed=self.rand_seed+1),
                                   trainable=True)
         self.b1 = self.add_weight(name='b1', 
                                   shape=(1,1,input_shape[-1]),
-                                  initializer=keras.initializers.Zeros(),
                                   trainable=True)
         self.b2 = self.add_weight(name='b2', 
                                   shape=(1,1,input_shape[-1]),
-                                  initializer=keras.initializers.Zeros(),
                                   trainable=True)
+        self.b1.assign(K.log(keras.initializers.RandomNormal(1,self.timesteps-1,seed=self.rand_seed+5)(self.b1.shape)))
+        self.b2.assign(-self.b1)
 
 
         # one separate batchnorm layer for each timestep
@@ -72,90 +83,110 @@ class hGRUCell(keras.layers.Layer):
                    for _ in range(self.timesteps*4)]
         
         # W: SxSxKxK shared inhibition/excitation kernel
-        self.w = self.add_weight(name='w', 
+        self.w_inh = self.add_weight(name='w_inh', 
                       shape=(self.spatial_extent, self.spatial_extent, 
                              input_shape[-1], input_shape[-1]),
-                      initializer=keras.initializers.glorot_normal(seed=self.rand_seed+2),
+                      initializer=keras.initializers.Orthogonal(seed=self.rand_seed+2),
                       trainable=True)
+        self.w_exc = self.add_weight(name='w_exc', 
+                      shape=(self.spatial_extent, self.spatial_extent, 
+                             input_shape[-1], input_shape[-1]),
+                      initializer=keras.initializers.Orthogonal(seed=self.rand_seed+3),
+                      trainable=True)
+        # symmetric init 
+        if self.channel_sym:
+            self.w_inh = (self.w_inh + K.permute_dimensions(self.w_inh, (0,1,3,2))) * 0.5
+            self.w_exc = (self.w_exc + K.permute_dimensions(self.w_exc, (0,1,3,2))) * 0.5
         
         # mu, alpha: channel-wise linear/quadratic control for inhibition
         self.mu = self.add_weight(name='mu',
                                   shape=(1,1,input_shape[-1]),
-                                  initializer=keras.initializers.Ones(),
                                   trainable=True)
         self.alpha = self.add_weight(name='alpha',
                                   shape=(1,1,input_shape[-1]),
-                                  initializer=keras.initializers.Ones(),
                                   trainable=True)
         
         # kappa, omega, beta: channel-wise linear/quadratic control and additional gain for excitation
         self.kappa = self.add_weight(name='kappa',
                                   shape=(1,1,input_shape[-1]),
-                                  initializer=keras.initializers.Ones(),
                                   trainable=True)
         self.omega = self.add_weight(name='omega',
                                   shape=(1,1,input_shape[-1]),
-                                  initializer=keras.initializers.Ones(),
                                   trainable=True)
         self.beta = self.add_weight(name='beta',    # TODO: initialize beta as ones?
                                   shape=(1,1,input_shape[-1]),
-                                  initializer=keras.initializers.Ones(),
                                   trainable=True)
+
+        self.mu.assign(K.ones(self.mu.shape) * 1.0)
+        self.alpha.assign(K.ones(self.alpha.shape) * 0.1)
+        self.kappa.assign(K.ones(self.kappa.shape) * 0.5)
+        self.omega.assign(K.ones(self.omega.shape) * 0.5)
+        self.beta.assign(K.ones(self.beta.shape) * 1.0)
         
         # eta: timestep weights
-        self.eta = self.add_weight(name='eta', 
-                                  shape=(self.timesteps,),
-                                  initializer=keras.initializers.glorot_normal(seed=self.rand_seed+3),
-                                  trainable=True)
+        if not self.batchnorm:
+            self.eta = self.add_weight(name='eta', 
+                                    shape=(self.timesteps,),
+                                    initializer=keras.initializers.glorot_normal(seed=self.rand_seed+4),
+                                    trainable=True)
         
         super(hGRUCell, self).build(input_shape)  # Be sure to call this at the end
 
     
-    def call(self, x, timestep):
+    def call(self, x, h2_prev, timestep, rand_seed=None):
         
         # NOTE: expected input shape: (batch, height, width, channel)
-        # NOTE: use the same x for all for loop iterations 
-        # NOTE: expect auto-broadcast when adding biases
         
-        # init h2 randomly
+        # init h2 and w
         if timestep == 0:
-            self.h2 = K.random_normal(K.shape(x))
+            # dirty workaround as glorot_normal won't take None as batch dim
+            if x.shape[0] == None: 
+                h2_prev = K.random_normal(K.shape(x))
+            else:
+                h2_prev = keras.initializers.glorot_normal(seed=rand_seed)(x.shape)
 
         # channel symmetry constraint for w; averaging weights
-        # TODO: NOT implemented
-        w_sym = (self.w + K.permute_dimensions(self.w, (0,1,3,2))) * 0.5
-
-        # calculate gain G(1)[t]
-        # horizontal inhibition C(1)[t]
-        if self.batchnorm:
-            g1 = K.sigmoid(self.bn[timestep*4](K.conv2d(self.h2, self.u1, padding='same') + self.b1))
-            c1 = self.bn[timestep*4+1](K.conv2d((g1 * self.h2), w_sym, padding='same'))
-        else:
-            g1 = K.sigmoid(K.conv2d(self.h2, self.u1) + self.b1)
-            c1 = K.conv2d((g1 * self.h2), w_sym , padding='same')
-
-        # gain gate / inhibition to get H(1)[t]
-        h1 = K.tanh(x - c1 * (self.alpha * self.h2 + self.mu))
-
-        # mix gate G(2)[t]
-        g2 = K.sigmoid(self.bn[timestep*4+2](K.conv2d(h1, self.u2, padding='same') + self.b2))
-
-        # horizontal excitation C(2)[t]
-        if self.batchnorm:
-            c2 = self.bn[timestep*4+3](K.conv2d(h1, w_sym , padding='same'))
-        else:
-            c2 = K.conv2d(h1, w_sym, padding='same')
-
-        # output candidate tilda(H(2)[t])
-        h2_tilda = K.tanh(self.kappa * h1 + c2 * (self.omega * h1 + self.beta))
-
-        # mix gate / excitation to get H(2)[t]
-        one_vec = K.ones_like(g2)
-        h2_t = self.eta[timestep] * (self.h2 * (one_vec - g2) + h2_tilda * g2)
-
-        # persist h2
-        self.h2 = h2_t
+        # TODO: implemented by tying weights (forward pass), not gradients (backward pass)
+        # w_sym_inh = (self.w_inh + K.permute_dimensions(self.w_inh, (0,1,3,2))) * 0.5
+        # w_sym_exc = (self.w_exc + K.permute_dimensions(self.w_exc, (0,1,3,2))) * 0.5
         
+        if self.batchnorm: # ReLU with recurrent batchnorm
+
+            # calculate gain G(1)[t]
+            g1 = K.sigmoid(self.bn[timestep*4](K.conv2d(h2_prev, self.u1, padding='same') + self.b1))
+
+            # horizontal inhibition C(1)[t]
+            c1 = self.bn[timestep*4+1](K.conv2d((g1 * h2_prev), self.w_inh, padding='same'))
+
+            # apply gain gate and inhibition to get H(1)[t]
+            h1 = K.relu(x - K.relu(c1 * (self.alpha * h2_prev + self.mu)))
+
+            # mix gate G(2)[t]
+            g2 = K.sigmoid(self.bn[timestep*4+2](K.conv2d(h1, self.u2, padding='same') + self.b2))
+
+            # horizontal excitation C(2)[t]
+            c2 = self.bn[timestep*4+3](K.conv2d(h1, self.w_exc , padding='same'))
+
+            # output candidate H_tilda(2)[t] via excitation
+            h2_tilda = K.relu(self.kappa * h1 + self.beta * c2 + self.omega * h1 * c2)
+
+            # apply mix gate to get H(2)[t]
+            h2_t = g2 * h2_tilda + (1 - g2) * h2_prev
+
+        else: # tanh with timestep weights, no batchnorm except at g2
+            g1 = K.sigmoid(K.conv2d(h2_prev, self.u1) + self.b1)
+            c1 = K.conv2d((g1 * h2_prev), self.w_inh , padding='same')
+            h1 = K.tanh(x - c1 * (self.alpha * h2_prev + self.mu))
+            g2 = K.sigmoid(self.bn[timestep*4+2](K.conv2d(h1, self.u2, padding='same') + self.b2))
+            c2 = K.conv2d(h1, self.w_exc, padding='same')
+            h2_tilda = K.tanh(self.kappa * h1 + self.beta * c2 + self.omega * h1 * c2)
+            h2_t = self.eta[timestep] * (g2 * h2_tilda + (1 - g2) * h2_prev)
+
+        # catch w kernel gradients and perform between-channel symmetry
+        if self.channel_sym:
+            self.w_inh = grad_channel_sym(self.w_inh)
+            self.w_exc = grad_channel_sym(self.w_exc)
+      
         return h2_t
 
 
@@ -169,10 +200,13 @@ class hGRUConv_binary(keras.Model):
     For binary classification, useful for the pathfinder task
     """
 
-    def __init__(self, conv1_init=None, **kwargs):
+    def __init__(self, conv1_init=None, spatial_extent=7, timesteps=8, **kwargs):
 
         # conv1 layer initialization weights; good idea to load gabor filters
         self.conv1_init = conv1_init
+        
+        self.timesteps = timesteps
+        self.spatial_extent = spatial_extent
 
         super(hGRUConv_binary, self).__init__(**kwargs)
 
@@ -185,7 +219,7 @@ class hGRUConv_binary(keras.Model):
             K.set_value(self.conv1.weights[0], self.conv1_init)
 
         # hGRU layer
-        self.hgru = hGRUCell(spatial_extent=15, timesteps=8, batchnorm=False)
+        self.hgru = hGRUCell(spatial_extent=self.spatial_extent, timesteps=self.timesteps, batchnorm=True)
 
         # conv filter from 25 to 2 channels
         self.conv2 = keras.layers.Conv2D(2, kernel_size=1, padding='same')
@@ -205,11 +239,12 @@ class hGRUConv_binary(keras.Model):
         x = K.pow(x,2) 
 
         # hGRU timesteps
-        for i in range(8):
-            x = self.hgru(x, i)
+        h2 = None
+        for i in range(self.timesteps):
+            h2 = self.hgru(x, h2, i)
 
         # readout stage
-        x = self.conv2(x)
+        x = self.conv2(h2)
         x = self.bn2(x)
         x = self.maxpool(x)
         x = self.bn_max(x)
@@ -229,10 +264,12 @@ class hGRUConv_segment(keras.Model):
     - upsampling stage mirrors downsampling stage
     """
 
-    def __init__(self, use_vgg_weights=True, **kwargs):
+    def __init__(self, use_vgg_weights=True, timesteps=8, **kwargs):
 
         # whether to initialize the downsampling path with VGG weights
         self.use_vgg_weights = use_vgg_weights
+
+        self.timesteps = timesteps
 
         super(hGRUConv_segment, self).__init__(**kwargs)
 
@@ -258,7 +295,7 @@ class hGRUConv_segment(keras.Model):
         del(vgg16)
 
         # hGRU layer
-        self.hgru = hGRUCell(spatial_extent=15, timesteps=8, batchnorm=True)
+        self.hgru = hGRUCell(spatial_extent=15, timesteps=self.timesteps, batchnorm=True)
 
         # two blocks of upsampling and conv, mirroring the input blocks
         self.block3_upsample = keras.layers.UpSampling2D(size=(2,2))
@@ -284,11 +321,12 @@ class hGRUConv_segment(keras.Model):
         x = self.block2_pool(x)
 
         # hGRU
-        for i in range(8):
-            x = self.hgru(x, i)
+        h2 = None
+        for i in range(self.timesteps):
+            h2 = self.hgru(x, h2, i)
 
         # upsampling stage
-        x = self.block3_upsample(x)
+        x = self.block3_upsample(h2)
         x = self.block3_conv1(x)
         x = self.block3_conv2(x)
         x = self.block4_upsample(x)
