@@ -186,7 +186,7 @@ class hGRUCell(keras.layers.Layer):
         return input_shape
 
 
-class hGRU(keras.Layer):
+class hGRU(keras.layers.Layer):
     """ 
     The hGRU layer, useful for making Sequential models 
 
