@@ -17,19 +17,11 @@ additional reference: https://github.com/josueortc/pathfinder (pytorch implement
 import random
 import numpy as np
 
-# dirty fix to enable plaidml
-use_plaidml = False
-if use_plaidml:
-    raise Exception("PlaidML implementation broken")
-    import plaidml.keras
-    plaidml.keras.install_backend()
-    import keras
-    import keras.backend as K
-else:  # explicitly import tensorflow.keras to fix compatibility issues
-    import tensorflow as tf
-    import tensorflow.keras as keras
-    import tensorflow.keras.backend as K
-    tf.compat.v1.disable_eager_execution() # needed for between-channel symmetry
+# explicitly import tensorflow.keras to fix compatibility issues
+import tensorflow as tf
+import tensorflow.keras as keras
+import tensorflow.keras.backend as K
+tf.compat.v1.disable_eager_execution() # needed for between-channel symmetry
 print("hGRU using Keras backend:", keras.backend.__name__)
 
 @tf.custom_gradient
@@ -41,14 +33,13 @@ def grad_channel_sym(w): # forward is identity, backward performs channel-sym
 
 class hGRUCell(keras.layers.Layer):
 
-    def __init__(self, spatial_extent=5, timesteps=8, batchnorm=False, channel_sym=True, 
-                 relu=True, rand_seed=None, return_all_steps=False, **kwargs):
+    def __init__(self, spatial_extent=5, timesteps=8, batchnorm=False, 
+                 channel_sym=True, rand_seed=None, **kwargs):
         
         self.spatial_extent = spatial_extent
         self.timesteps = timesteps
         self.batchnorm = batchnorm
         self.channel_sym = channel_sym
-        self.relu = relu
         self.rand_seed = rand_seed if rand_seed else np.uintc(hash(random.random()))
         
         super(hGRUCell, self).__init__(**kwargs)
@@ -74,7 +65,8 @@ class hGRUCell(keras.layers.Layer):
         self.b2 = self.add_weight(name='b2', 
                                   shape=(1,1,input_shape[-1]),
                                   trainable=True)
-        self.b1.assign(K.log(keras.initializers.RandomNormal(1,self.timesteps-1,seed=self.rand_seed+5)(self.b1.shape)))
+        self.b1.assign(K.log(keras.initializers.RandomNormal(1,self.timesteps-1,
+                                                             seed=self.rand_seed+5)(self.b1.shape)))
         self.b2.assign(-self.b1)
 
 
@@ -95,8 +87,8 @@ class hGRUCell(keras.layers.Layer):
                       trainable=True)
         # symmetric init 
         if self.channel_sym:
-            self.w_inh = (self.w_inh + K.permute_dimensions(self.w_inh, (0,1,3,2))) * 0.5
-            self.w_exc = (self.w_exc + K.permute_dimensions(self.w_exc, (0,1,3,2))) * 0.5
+            K.set_value(self.w_inh, (self.w_inh + K.permute_dimensions(self.w_inh, (0,1,3,2))) * 0.5)
+            K.set_value(self.w_exc, (self.w_exc + K.permute_dimensions(self.w_exc, (0,1,3,2))) * 0.5)
         
         # mu, alpha: channel-wise linear/quadratic control for inhibition
         self.mu = self.add_weight(name='mu',
@@ -189,6 +181,40 @@ class hGRUCell(keras.layers.Layer):
       
         return h2_t
 
+
+    def compute_output_shape(self, input_shape):
+        return input_shape
+
+
+class hGRU(keras.Layer):
+    """ 
+    The hGRU layer, useful for making Sequential models 
+
+    """
+
+    def __init__(self, spatial_extent=5, timesteps=8, batchnorm=False, channel_sym=True,
+                 return_sequences=False, rand_seed=None, **kwargs):
+        self.spatial_extent = spatial_extent
+        self.timesteps = timesteps
+        self.batchnorm = batchnorm
+        self.channel_sym = channel_sym
+        self.rand_seed = rand_seed if rand_seed else np.uintc(hash(random.random()))
+        super(hGRU, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        self.hgru = hGRUCell(spatial_extent=self.spatial_extent, timesteps=self.timesteps, 
+                             batchnorm=self.batchnorm, channel_sym=self.channel_sym,
+                             rand_seed=self.rand_seed)
+        super(hGRU, self).build(input_shape)
+
+    def call(self, x):
+        h2_seq = [None]
+        for i in range(self.timesteps):
+            h2_seq += [self.hgru(x, h2_seq[-1], i)]
+        if self.return_sequences: # shape: [batch, timestep, h, w, ch]
+            return K.stack(h2_seq, axis=1)
+        else:
+            return h2_seq[-1]
 
     def compute_output_shape(self, input_shape):
         return input_shape
