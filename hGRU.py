@@ -21,7 +21,7 @@ import numpy as np
 import tensorflow as tf
 import tensorflow.keras as keras
 import tensorflow.keras.backend as K
-# tf.compat.v1.disable_eager_execution() # needed for between-channel symmetry
+tf.compat.v1.disable_eager_execution() # a lot faster using static graphs
 print("hGRU using Keras backend:", keras.backend.__name__)
 
 @tf.custom_gradient
