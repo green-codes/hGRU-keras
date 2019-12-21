@@ -87,8 +87,8 @@ class hGRUCell(keras.layers.Layer):
                       trainable=True)
         # symmetric init 
         if self.channel_sym:
-            K.set_value(self.w_inh, (self.w_inh + K.permute_dimensions(self.w_inh, (0,1,3,2))) * 0.5)
-            K.set_value(self.w_exc, (self.w_exc + K.permute_dimensions(self.w_exc, (0,1,3,2))) * 0.5)
+            self.w_inh.assign((self.w_inh + K.permute_dimensions(self.w_inh, (0,1,3,2))) * 0.5)
+            self.w_exc.assign((self.w_exc + K.permute_dimensions(self.w_exc, (0,1,3,2))) * 0.5)
         
         # mu, alpha: channel-wise linear/quadratic control for inhibition
         self.mu = self.add_weight(name='mu',
