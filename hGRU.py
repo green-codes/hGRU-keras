@@ -21,20 +21,26 @@ import numpy as np
 import tensorflow as tf
 import tensorflow.keras as keras
 import tensorflow.keras.backend as K
-tf.compat.v1.disable_eager_execution() # needed for between-channel symmetry
+# tf.compat.v1.disable_eager_execution() # needed for between-channel symmetry
 print("hGRU using Keras backend:", keras.backend.__name__)
 
 @tf.custom_gradient
-def grad_channel_sym(w): # forward is identity, backward performs channel-sym
-    # NOTE: currently needs to disable eager execution, bug in TF2.0?
-    def grad(dw):
-        return (dw + tf.transpose(dw, perm=[0,1,3,2])) * 0.5
-    return tf.identity(w), grad
+def channel_sym_conv2d(x, w): 
+    with tf.GradientTape() as gx, tf.GradientTape() as gw:
+        gx.watch(x)
+        gw.watch(w)
+        y = tf.nn.conv2d(x, w, 1, 'SAME')
+    def grad(dy):
+        dx = gx.gradient(y,x)
+        dw = gw.gradient(y,w)
+        dw = (dw + tf.transpose(dw, perm=[0,1,3,2])) * 0.5 # tie gradients
+        return dx, dw
+    return tf.identity(y), grad
 
 class hGRUCell(keras.layers.Layer):
 
     def __init__(self, spatial_extent=5, timesteps=8, batchnorm=False, 
-                 channel_sym=False, rand_seed=None, **kwargs):
+                 channel_sym=True, rand_seed=None, **kwargs):
         
         self.spatial_extent = spatial_extent
         self.timesteps = timesteps
@@ -148,7 +154,11 @@ class hGRUCell(keras.layers.Layer):
             g1 = K.sigmoid(self.bn[timestep*4](K.conv2d(h2_prev, self.u1, padding='same') + self.b1))
 
             # horizontal inhibition C(1)[t]
-            c1 = self.bn[timestep*4+1](K.conv2d((g1 * h2_prev), self.w_inh, padding='same'))
+            if self.channel_sym:
+                conv_inh = channel_sym_conv2d((g1 * h2_prev), self.w_inh)
+            else:
+                conv_inh = K.conv2d((g1 * h2_prev), self.w_inh, padding='same')
+            c1 = self.bn[timestep*4+1](conv_inh)
 
             # apply gain gate and inhibition to get H(1)[t]
             h1 = K.relu(x - K.relu(c1 * (self.alpha * h2_prev + self.mu)))
@@ -157,7 +167,11 @@ class hGRUCell(keras.layers.Layer):
             g2 = K.sigmoid(self.bn[timestep*4+2](K.conv2d(h1, self.u2, padding='same') + self.b2))
 
             # horizontal excitation C(2)[t]
-            c2 = self.bn[timestep*4+3](K.conv2d(h1, self.w_exc , padding='same'))
+            if self.channel_sym:
+                conv_exc = channel_sym_conv2d(h1, self.w_exc)
+            else:
+                conv_exc = K.conv2d(h1, self.w_exc , padding='same')
+            c2 = self.bn[timestep*4+3](conv_exc)
 
             # output candidate H_tilda(2)[t] via excitation
             h2_tilda = K.relu(self.kappa * h1 + self.beta * c2 + self.omega * h1 * c2)
@@ -167,17 +181,18 @@ class hGRUCell(keras.layers.Layer):
 
         else: # tanh with timestep weights, no batchnorm except at g2
             g1 = K.sigmoid(K.conv2d(h2_prev, self.u1) + self.b1)
-            c1 = K.conv2d((g1 * h2_prev), self.w_inh , padding='same')
+            if self.channel_sym:
+                c1 = channel_sym_conv2d((g1 * h2_prev), self.w_inh)
+            else:
+                c1 = K.conv2d((g1 * h2_prev), self.w_inh, padding='same')
             h1 = K.tanh(x - c1 * (self.alpha * h2_prev + self.mu))
             g2 = K.sigmoid(self.bn[timestep*4+2](K.conv2d(h1, self.u2, padding='same') + self.b2))
-            c2 = K.conv2d(h1, self.w_exc, padding='same')
+            if self.channel_sym:
+                c2 = channel_sym_conv2d(h1, self.w_exc)
+            else:
+                c2 = K.conv2d(h1, self.w_exc , padding='same')
             h2_tilda = K.tanh(self.kappa * h1 + self.beta * c2 + self.omega * h1 * c2)
             h2_t = self.eta[timestep] * (g2 * h2_tilda + (1 - g2) * h2_prev)
-
-        # catch w kernel gradients and perform between-channel symmetry
-        if self.channel_sym:
-            self.w_inh = grad_channel_sym(self.w_inh)
-            self.w_exc = grad_channel_sym(self.w_exc)
       
         return h2_t
 
