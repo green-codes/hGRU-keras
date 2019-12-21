@@ -34,7 +34,7 @@ def grad_channel_sym(w): # forward is identity, backward performs channel-sym
 class hGRUCell(keras.layers.Layer):
 
     def __init__(self, spatial_extent=5, timesteps=8, batchnorm=False, 
-                 channel_sym=True, rand_seed=None, **kwargs):
+                 channel_sym=False, rand_seed=None, **kwargs):
         
         self.spatial_extent = spatial_extent
         self.timesteps = timesteps
