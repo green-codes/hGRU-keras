@@ -26,20 +26,18 @@ print("hGRU using Keras backend:", keras.backend.__name__)
 
 @tf.custom_gradient
 def channel_sym_conv2d(x, w): 
-    with tf.GradientTape() as gx, tf.GradientTape() as gw:
-        gx.watch(x)
-        gw.watch(w)
+    with tf.GradientTape() as g:
+        g.watch([x,w])
         y = tf.nn.conv2d(x, w, 1, 'SAME')
     def grad(dy):
-        dx = gx.gradient(y,x)
-        dw = gw.gradient(y,w)
+        dx, dw = g.gradient(y,[x,w])
         dw = (dw + tf.transpose(dw, perm=[0,1,3,2])) * 0.5 # tie gradients
         return dx, dw
     return tf.identity(y), grad
 
 class hGRUCell(keras.layers.Layer):
 
-    def __init__(self, spatial_extent=5, timesteps=8, batchnorm=False, 
+    def __init__(self, spatial_extent=5, timesteps=8, batchnorm=True, 
                  channel_sym=True, rand_seed=None, **kwargs):
         
         self.spatial_extent = spatial_extent
@@ -207,7 +205,7 @@ class hGRU(keras.layers.Layer):
 
     """
 
-    def __init__(self, spatial_extent=5, timesteps=8, batchnorm=False, channel_sym=True,
+    def __init__(self, spatial_extent=5, timesteps=8, batchnorm=True, channel_sym=True,
                  return_sequences=False, rand_seed=None, **kwargs):
         self.spatial_extent = spatial_extent
         self.timesteps = timesteps
