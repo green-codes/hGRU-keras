@@ -30,7 +30,7 @@ def channel_sym_conv2d(x, w):
         g.watch([x,w])
         y = tf.nn.conv2d(x, w, 1, 'SAME')
     def grad(dy):
-        dx, dw = g.gradient(y,[x,w])
+        dx, dw = g.gradient(y,[x,w],output_gradients=dy)
         dw = (dw + tf.transpose(dw, perm=[0,1,3,2])) * 0.5 # tie gradients
         return dx, dw
     return tf.identity(y), grad
@@ -49,28 +49,24 @@ class hGRUCell(keras.layers.Layer):
         super(hGRUCell, self).__init__(**kwargs)
 
     def build(self, input_shape):
+
+        k_dim = self.spatial_extent
+        in_ch = input_shape[-1]
         
         # NOTE: assume channel-last inputs
         # NOTE: make sure that all initializer seeds are different! 
         
         # U(1) and U(2): 1x1xKxK kernels; b(1) and b(2): 1x1xK channel-wise gate biases
-        # NOTE: use orthogonal init for 1x1 conv kernels, chronos init for biases
-        self.u1 = self.add_weight(name='u1', 
-                                  shape=(1,1,input_shape[-1], input_shape[-1]),
-                                  initializer=keras.initializers.Orthogonal(seed=self.rand_seed),
-                                  trainable=True)
-        self.u2 = self.add_weight(name='u2', 
-                                  shape=(1,1,input_shape[-1], input_shape[-1]),
-                                  initializer=keras.initializers.Orthogonal(seed=self.rand_seed+1),
-                                  trainable=True)
-        self.b1 = self.add_weight(name='b1', 
-                                  shape=(1,1,input_shape[-1]),
-                                  trainable=True)
-        self.b2 = self.add_weight(name='b2', 
-                                  shape=(1,1,input_shape[-1]),
-                                  trainable=True)
-        self.b1.assign(K.log(keras.initializers.RandomUniform(1.0, self.timesteps-1.0,
-                                                              seed=self.rand_seed+5)(self.b1.shape)))
+        self.u1 = self.add_weight(name='u1', shape=(1,1,in_ch, in_ch), trainable=True)
+        self.u2 = self.add_weight(name='u2', shape=(1,1,in_ch, in_ch), trainable=True)
+        self.b1 = self.add_weight(name='b1', shape=(1,1,in_ch), trainable=True)
+        self.b2 = self.add_weight(name='b2', shape=(1,1,in_ch), trainable=True)
+
+        orthogonal_init = keras.initializers.Orthogonal(seed=self.rand_seed)
+        randu_init = keras.initializers.RandomUniform(1.0, self.timesteps-1.0, seed=self.rand_seed+1)
+        self.u1.assign(orthogonal_init(self.u1.shape))
+        self.u2.assign(orthogonal_init(self.u2.shape))
+        self.b1.assign(K.log(randu_init(self.b1.shape))) # chronos init
         self.b2.assign(-self.b1)
 
         # one separate batchnorm layer for each timestep
@@ -78,38 +74,21 @@ class hGRUCell(keras.layers.Layer):
                    for _ in range(self.timesteps*4)]
         
         # W: SxSxKxK shared inhibition/excitation kernel
-        self.w_inh = self.add_weight(name='w_inh', 
-                      shape=(self.spatial_extent, self.spatial_extent, 
-                             input_shape[-1], input_shape[-1]),
-                      initializer=keras.initializers.Orthogonal(seed=self.rand_seed+2),
-                      trainable=True)
-        self.w_exc = self.add_weight(name='w_exc', 
-                      shape=(self.spatial_extent, self.spatial_extent, 
-                             input_shape[-1], input_shape[-1]),
-                      initializer=keras.initializers.Orthogonal(seed=self.rand_seed+3),
-                      trainable=True)
+        self.w_inh = self.add_weight(name='w_inh', shape=(k_dim, k_dim, in_ch, in_ch), trainable=True)
+        self.w_exc = self.add_weight(name='w_exc', shape=(k_dim, k_dim, in_ch, in_ch), trainable=True)
+        self.w_inh.assign(orthogonal_init(self.w_inh.shape))
+        self.w_exc.assign(orthogonal_init(self.w_exc.shape))
         if self.channel_sym: # channel symmetric init 
             self.w_inh.assign((self.w_inh + K.permute_dimensions(self.w_inh, (0,1,3,2))) * 0.5)
             self.w_exc.assign((self.w_exc + K.permute_dimensions(self.w_exc, (0,1,3,2))) * 0.5)
         
         # mu, alpha: channel-wise linear/quadratic control for inhibition
-        self.mu = self.add_weight(name='mu',
-                                  shape=(1,1,input_shape[-1]),
-                                  trainable=True)
-        self.alpha = self.add_weight(name='alpha',
-                                  shape=(1,1,input_shape[-1]),
-                                  trainable=True)
-        
         # kappa, omega, beta: channel-wise linear/quadratic control and additional gain for excitation
-        self.kappa = self.add_weight(name='kappa',
-                                  shape=(1,1,input_shape[-1]),
-                                  trainable=True)
-        self.omega = self.add_weight(name='omega',
-                                  shape=(1,1,input_shape[-1]),
-                                  trainable=True)
-        self.beta = self.add_weight(name='beta',    # TODO: initialize beta as ones?
-                                  shape=(1,1,input_shape[-1]),
-                                  trainable=True)
+        self.mu = self.add_weight(name='mu', shape=(1,1,in_ch), trainable=True)
+        self.alpha = self.add_weight(name='alpha', shape=(1,1,in_ch), trainable=True)
+        self.kappa = self.add_weight(name='kappa', shape=(1,1,in_ch), trainable=True)
+        self.omega = self.add_weight(name='omega', shape=(1,1,in_ch), trainable=True)
+        self.beta = self.add_weight(name='beta', shape=(1,1,in_ch), trainable=True)
 
         self.mu.assign(K.ones(self.mu.shape) * 1.0)
         self.alpha.assign(K.ones(self.alpha.shape) * 0.1)
@@ -118,10 +97,10 @@ class hGRUCell(keras.layers.Layer):
         self.beta.assign(K.ones(self.beta.shape) * 1.0)
         
         # eta: timestep weights
+        glorot_init = keras.initializers.glorot_normal(seed=self.rand_seed+2)
         if not self.batchnorm:
             self.eta = self.add_weight(name='eta', shape=(self.timesteps,),
-                                    initializer=keras.initializers.glorot_normal(seed=self.rand_seed+4),
-                                    trainable=True)
+                                       initializer=glorot_init, trainable=True)
         
         super(hGRUCell, self).build(input_shape)  # Be sure to call this at the end
 
