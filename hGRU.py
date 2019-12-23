@@ -256,9 +256,11 @@ class hGRUConv_binary(keras.Model):
         if self.conv1_init is not None:
             self.conv1.build(input_shape)
             K.set_value(self.conv1.weights[0], self.conv1_init)
+            self.conv1.trainable = False  # freeze conv1
 
         # hGRU layer
-        self.hgru = hGRUCell(spatial_extent=self.spatial_extent, timesteps=self.timesteps, batchnorm=True)
+        self.hgru = hGRUCell(spatial_extent=self.spatial_extent, timesteps=self.timesteps, 
+                             batchnorm=True, channel_sym=True)
         self.bn = keras.layers.BatchNormalization(epsilon=1e-3)
 
         # conv filter from 25 to 2 channels
@@ -269,7 +271,7 @@ class hGRUConv_binary(keras.Model):
         self.bn_max = keras.layers.BatchNormalization(epsilon=1e-3)
         
         # linear output layer
-        self.fc = keras.layers.Dense(units=2, activation='linear')
+        self.fc = keras.layers.Dense(units=2, activation='softmax')
 
         super(hGRUConv_binary, self).build(input_shape) 
 
