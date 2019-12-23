@@ -54,7 +54,7 @@ class hGRUCell(keras.layers.Layer):
         # NOTE: make sure that all initializer seeds are different! 
         
         # U(1) and U(2): 1x1xKxK kernels; b(1) and b(2): 1x1xK channel-wise gate biases
-        # NOTE: use chronos initialization for biases
+        # NOTE: use orthogonal init for 1x1 conv kernels, chronos init for biases
         self.u1 = self.add_weight(name='u1', 
                                   shape=(1,1,input_shape[-1], input_shape[-1]),
                                   initializer=keras.initializers.Orthogonal(seed=self.rand_seed),
@@ -69,10 +69,9 @@ class hGRUCell(keras.layers.Layer):
         self.b2 = self.add_weight(name='b2', 
                                   shape=(1,1,input_shape[-1]),
                                   trainable=True)
-        self.b1.assign(K.log(keras.initializers.RandomNormal(1,self.timesteps-1,
-                                                             seed=self.rand_seed+5)(self.b1.shape)))
+        self.b1.assign(K.log(keras.initializers.RandomUniform(1.0, self.timesteps-1.0,
+                                                              seed=self.rand_seed+5)(self.b1.shape)))
         self.b2.assign(-self.b1)
-
 
         # one separate batchnorm layer for each timestep
         self.bn = [keras.layers.BatchNormalization(momentum=0.001, epsilon=1e-03) 
@@ -89,8 +88,7 @@ class hGRUCell(keras.layers.Layer):
                              input_shape[-1], input_shape[-1]),
                       initializer=keras.initializers.Orthogonal(seed=self.rand_seed+3),
                       trainable=True)
-        # symmetric init 
-        if self.channel_sym:
+        if self.channel_sym: # channel symmetric init 
             self.w_inh.assign((self.w_inh + K.permute_dimensions(self.w_inh, (0,1,3,2))) * 0.5)
             self.w_exc.assign((self.w_exc + K.permute_dimensions(self.w_exc, (0,1,3,2))) * 0.5)
         
@@ -121,8 +119,7 @@ class hGRUCell(keras.layers.Layer):
         
         # eta: timestep weights
         if not self.batchnorm:
-            self.eta = self.add_weight(name='eta', 
-                                    shape=(self.timesteps,),
+            self.eta = self.add_weight(name='eta', shape=(self.timesteps,),
                                     initializer=keras.initializers.glorot_normal(seed=self.rand_seed+4),
                                     trainable=True)
         
@@ -140,11 +137,6 @@ class hGRUCell(keras.layers.Layer):
                 h2_prev = K.random_normal(K.shape(x))
             else:
                 h2_prev = keras.initializers.glorot_normal(seed=rand_seed)(x.shape)
-
-        # channel symmetry constraint for w; averaging weights
-        # TODO: implemented by tying weights (forward pass), not gradients (backward pass)
-        # w_sym_inh = (self.w_inh + K.permute_dimensions(self.w_inh, (0,1,3,2))) * 0.5
-        # w_sym_exc = (self.w_exc + K.permute_dimensions(self.w_exc, (0,1,3,2))) * 0.5
         
         if self.batchnorm: # ReLU with recurrent batchnorm
 
@@ -211,6 +203,7 @@ class hGRU(keras.layers.Layer):
         self.timesteps = timesteps
         self.batchnorm = batchnorm
         self.channel_sym = channel_sym
+        self.return_sequences = return_sequences
         self.rand_seed = rand_seed if rand_seed else np.uintc(hash(random.random()))
         super(hGRU, self).__init__(**kwargs)
 
@@ -239,7 +232,7 @@ class hGRUConv_binary(keras.Model):
     For binary classification, useful for the pathfinder task
     """
 
-    def __init__(self, conv1_init=None, spatial_extent=7, timesteps=8, **kwargs):
+    def __init__(self, conv1_init=None, spatial_extent=9, timesteps=8, **kwargs):
 
         # conv1 layer initialization weights; good idea to load gabor filters
         self.conv1_init = conv1_init
@@ -264,7 +257,8 @@ class hGRUConv_binary(keras.Model):
         self.bn = keras.layers.BatchNormalization(epsilon=1e-3)
 
         # conv filter from 25 to 2 channels
-        self.conv2 = keras.layers.Conv2D(2, kernel_size=1, padding='same', activation='relu')
+        self.conv2 = keras.layers.Conv2D(2, kernel_size=1, padding='same', activation='linear')
+        self.lrelu = keras.layers.LeakyReLU()
 
         # global max pool w/batchnorm; output should be (1,1,2)
         self.maxpool = keras.layers.MaxPool2D((input_shape[1], input_shape[2]), strides=(1,1))
@@ -288,7 +282,7 @@ class hGRUConv_binary(keras.Model):
         h2 = self.bn(h2)
 
         # readout stage
-        x = self.conv2(h2)
+        x = self.lrelu(self.conv2(h2))
         x = self.maxpool(x)
         x = self.bn_max(x)
         x = K.reshape(x, (-1, 2))
