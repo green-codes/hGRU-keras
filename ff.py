@@ -37,7 +37,7 @@ class FFConv(keras.Model):
         self.bn5 = keras.layers.BatchNormalization()
         self.conv6 = keras.layers.Conv2D(filters=2, kernel_size=1)
         self.bn6 = keras.layers.BatchNormalization()
-        self.pool = keras.layers.MaxPool2D(pool_size=(input_shape[0], input_shape[1]))
+        self.pool = keras.layers.MaxPool2D(pool_size=(input_shape[1], input_shape[2]))
         self.fc = keras.layers.Dense(units=2)
 
     def call(self, x):
