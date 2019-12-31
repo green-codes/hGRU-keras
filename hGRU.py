@@ -57,8 +57,8 @@ class hGRUCell(keras.layers.Layer):
         # NOTE: make sure that all initializer seeds are different! 
         
         # U(1) and U(2): 1x1xKxK kernels; b(1) and b(2): 1x1xK channel-wise gate biases
-        self.u1 = self.add_weight(name='u1', shape=(1,1,in_ch, in_ch), trainable=True)
-        self.u2 = self.add_weight(name='u2', shape=(1,1,in_ch, in_ch), trainable=True)
+        self.u1 = self.add_weight(name='u1', shape=(1,1,in_ch,in_ch), trainable=True)
+        self.u2 = self.add_weight(name='u2', shape=(1,1,in_ch,in_ch), trainable=True)
         self.b1 = self.add_weight(name='b1', shape=(1,1,in_ch), trainable=True)
         self.b2 = self.add_weight(name='b2', shape=(1,1,in_ch), trainable=True)
 
@@ -244,7 +244,7 @@ class hGRUConv_binary(keras.Model):
         self.bn_max = keras.layers.BatchNormalization(epsilon=1e-3)
         
         # linear output layer
-        self.fc = keras.layers.Dense(units=2, activation='softmax')
+        self.fc = keras.layers.Dense(units=2, activation='linear')
 
         super(hGRUConv_binary, self).build(input_shape) 
 
