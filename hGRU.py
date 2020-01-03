@@ -37,8 +37,8 @@ def channel_sym_conv2d(x, w):
 
 class hGRUCell(keras.layers.Layer):
 
-    def __init__(self, spatial_extent=5, timesteps=8, batchnorm=True, 
-                 channel_sym=True, rand_seed=None, **kwargs):
+    def __init__(self, spatial_extent, timesteps, batchnorm, channel_sym, 
+                 rand_seed=None, **kwargs):
         
         self.spatial_extent = spatial_extent
         self.timesteps = timesteps
@@ -47,6 +47,15 @@ class hGRUCell(keras.layers.Layer):
         self.rand_seed = rand_seed if rand_seed else np.uintc(hash(random.random()))
         
         super(hGRUCell, self).__init__(**kwargs)
+        
+    def get_config(self):
+        base_config = super(hGRUCell, self).get_config()
+        base_config['spatial_extent'] = self.spatial_extent
+        base_config['timesteps'] = self.timesteps
+        base_config['batchnorm'] = self.batchnorm
+        base_config['channel_sym'] = self.channel_sym
+        base_config['rand_seed'] = self.rand_seed
+        return base_config
 
     def build(self, input_shape):
 
@@ -120,7 +129,7 @@ class hGRUCell(keras.layers.Layer):
         if self.batchnorm: # ReLU with recurrent batchnorm
 
             # calculate gain G(1)[t]
-            g1 = K.sigmoid(self.bn[timestep*4](K.conv2d(h2_prev, self.u1, padding='same') + self.b1))
+            g1 = K.sigmoid(self.bn[timestep*4](K.conv2d(h2_prev, self.u1) + self.b1))
 
             # horizontal inhibition C(1)[t]
             if self.channel_sym:
@@ -133,7 +142,7 @@ class hGRUCell(keras.layers.Layer):
             h1 = K.relu(x - K.relu(c1 * (self.alpha * h2_prev + self.mu)))
 
             # mix gate G(2)[t]
-            g2 = K.sigmoid(self.bn[timestep*4+2](K.conv2d(h1, self.u2, padding='same') + self.b2))
+            g2 = K.sigmoid(self.bn[timestep*4+2](K.conv2d(h1, self.u2) + self.b2))
 
             # horizontal excitation C(2)[t]
             if self.channel_sym:
@@ -155,7 +164,7 @@ class hGRUCell(keras.layers.Layer):
             else:
                 c1 = K.conv2d((g1 * h2_prev), self.w_inh, padding='same')
             h1 = K.tanh(x - c1 * (self.alpha * h2_prev + self.mu))
-            g2 = K.sigmoid(self.bn[timestep*4+2](K.conv2d(h1, self.u2, padding='same') + self.b2))
+            g2 = K.sigmoid(self.bn[timestep*4+2](K.conv2d(h1, self.u2) + self.b2))
             if self.channel_sym:
                 c2 = channel_sym_conv2d(h1, self.w_exc)
             else:
@@ -176,7 +185,7 @@ class hGRU(keras.layers.Layer):
 
     """
 
-    def __init__(self, spatial_extent=5, timesteps=8, batchnorm=True, channel_sym=True,
+    def __init__(self, spatial_extent=15, timesteps=4, batchnorm=True, channel_sym=True,
                  return_sequences=False, rand_seed=None, **kwargs):
         self.spatial_extent = spatial_extent
         self.timesteps = timesteps
@@ -185,6 +194,16 @@ class hGRU(keras.layers.Layer):
         self.return_sequences = return_sequences
         self.rand_seed = rand_seed if rand_seed else np.uintc(hash(random.random()))
         super(hGRU, self).__init__(**kwargs)
+        
+    def get_config(self):
+        base_config = super(hGRUCell, self).get_config()
+        base_config['spatial_extent'] = self.spatial_extent
+        base_config['timesteps'] = self.timesteps
+        base_config['batchnorm'] = self.batchnorm
+        base_config['channel_sym'] = self.channel_sym
+        base_config['return_sequences'] = self.return_sequences
+        base_config['rand_seed'] = self.rand_seed
+        return base_config
 
     def build(self, input_shape):
         self.hgru = hGRUCell(spatial_extent=self.spatial_extent, timesteps=self.timesteps, 
@@ -195,9 +214,9 @@ class hGRU(keras.layers.Layer):
     def call(self, x):
         h2_seq = [None]
         for i in range(self.timesteps):
-            h2_seq += [self.hgru(x, h2_seq[-1], i)]
+            h2_seq += [self.hgru(x, h2_seq[-1], i, self.rand_seed)]
         if self.return_sequences: # shape: [batch, timestep, h, w, ch]
-            return K.stack(h2_seq, axis=1)
+            return K.stack(h2_seq[1:], axis=1)
         else:
             return h2_seq[-1]
 
@@ -236,7 +255,7 @@ class hGRUConv_binary(keras.Model):
         self.bn = keras.layers.BatchNormalization(epsilon=1e-3)
 
         # conv filter from 25 to 2 channels
-        self.conv2 = keras.layers.Conv2D(2, kernel_size=1, padding='same', activation='linear')
+        self.conv2 = keras.layers.Conv2D(2, kernel_size=1, padding='same')
         self.lrelu = keras.layers.LeakyReLU()
 
         # global max pool w/batchnorm; output should be (1,1,2)
